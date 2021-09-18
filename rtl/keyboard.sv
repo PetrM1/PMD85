@@ -26,7 +26,7 @@ reg stop;
 
 
 assign shift = shiftExtra & ((shiftL & shiftR) ^ capsLock);
-assign columns = (~reset) ? {1'b0, stop, shift, keys[row]} : 7'hz;
+assign columns = (~reset) ? {1'b0, stop, shift, keys[row]} : 8'hz;
 	
 
 reg old_stb;

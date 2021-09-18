@@ -7,6 +7,11 @@ module i8255(
 	input [7:0] DIn,
 	output [7:0] DOut,
 
+	output reg PAisInput,
+	output reg PBisInput,
+	output reg PCLisInput,
+	output reg PCHisInput,
+	
 	input clk,
 	input RD_n,
 	input WR_n,
@@ -19,10 +24,7 @@ module i8255(
 
 reg [1:0] grpAmode; // port A + port C[7:4]
 reg grpBmode; // port B + port C[3:0]
-reg PAisInput;
-reg PBisInput;
-reg PCLisInput;
-reg PCHisInput;
+
 
 reg [7:0] PAreg;
 reg [7:0] PBreg;
@@ -117,7 +119,7 @@ begin
 					end 
 					else begin
 						// port C bit set / reset flag
-						PCreg[DIn[3:2]] <= DIn[0];
+						PCreg[DIn[3:1]] <= DIn[0];
 					end
 				end
 		endcase

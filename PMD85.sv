@@ -158,12 +158,12 @@ localparam CONF_STR = {
 	"F1,rmm,Load to ROM Pack",
 	"-;",
 	"O12,Video,Green,TV,RGB,ColorACE;",
-	"O3,Sound,Beeper,Beeper + MIF85 on K2;",
+	"D0O3,Sound,Beeper,Beeper + MIF85 on K2;",
 	"O45,Joystick,None,K3,K4;",
-// not done yet	"O6,Mouse,None,K2;",		
+	"D1O6,Mouse,None,K2;",		
 	"-;",	
 	"R0,Reset PMD;",
-	"J,Fire 1,Fire 2,Fire 3;",
+	"J,Fire 1,Fire 2;",
 	"V,v",`BUILD_DATE 
 };
 
@@ -171,6 +171,7 @@ wire forced_scandoubler = 1;
 wire  [1:0] buttons;
 wire [31:0] status;
 wire [10:0] ps2_key;
+wire [24:0] ps2_mouse;
 
 wire        ioctl_wr;
 wire [24:0] ioctl_addr;
@@ -191,9 +192,10 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 
 	.buttons(buttons),
 	.status(status),
-	.status_menumask({status[5]}),
+	.status_menumask({status[3], status[6]}),
 	
 	.ps2_key(ps2_key),
+	.ps2_mouse(ps2_mouse),
 	
 	.joystick_0(joy0),
 	.joystick_1(joy1),
@@ -242,12 +244,14 @@ PMD85_2A PMD85core
 	.clk_sys(clk_sys),
 	.reset_main(reset),
 	.ps2_key(ps2_key),
+	.ps2_mouse(ps2_mouse),
 	.clk_video(clk_video),
 	.SR_n(SR_n),
 	.SD_n(SD_n),
 	.ZAT_n(ZAT_n), 
 	.pixel(pixel),
 	
+	.ADC_BUS(ADC_BUS),
 	.audioMode(status[3]),
 	.AUDIO_L(AUDIO_L),
 	.AUDIO_R(AUDIO_R),
@@ -263,6 +267,7 @@ PMD85_2A PMD85core
 	.joystickPort(status[5:4]),
 	.joy0(joy0),
 	.joy1(joy1),
+	.mouseEnabled(status[6]),
 	
 	.ioctl_wr(ioctl_wr),	
 	.ioctl_addr(ioctl_addr),

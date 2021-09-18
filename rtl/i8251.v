@@ -10,7 +10,8 @@ module i8251(
 	inout [7:0] d,
 	
 	input RxC_n,
-	input TxC_n
+	input TxC_n,
+	input DSR_n
 );
 //
 //// Mode instruction  - Asynchronous mode
@@ -64,7 +65,7 @@ reg [7:0] TxBit;
 
 wire [7:0] status;
 	
-assign status = {5'd0, (TxBit == 8'hFF), 1'b0, (TxBit == 8'hFF)};
+assign status = {~DSR_n, 4'd0, (TxBit == 8'hFF), 1'b0, (TxBit == 8'hFF)};
 	
 assign d = (~cs_n & ~rd_n) ?  status : 8'hzz;
 	

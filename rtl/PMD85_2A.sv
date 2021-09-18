@@ -6,6 +6,7 @@ module PMD85_2A (
 	input clk_sys, // PMD85 system clock (for 8224) is 18.432MHz
 	input reset_main,
 	input [10:0] ps2_key,
+	input [24:0] ps2_mouse,
 
 	output clk_video,
 	output SR_n,
@@ -13,6 +14,8 @@ module PMD85_2A (
 	output ZAT_n,
 	output pixel,
 	 
+	inout  [3:0] ADC_BUS,
+	
 	input audioMode, 				// 0 = Beeper, 1 = Beeper + MIF85
 	output [15:0] AUDIO_L,
 	output [15:0] AUDIO_R,
@@ -20,6 +23,7 @@ module PMD85_2A (
 	input [1:0] joystickPort, // 00 = None, 01 = K3, 10 = K4
 	input [15:0] joy0,
 	input [15:0] joy1,
+	input mouseEnabled,
 	
 	input [1:0] ColorMode,
 	output [7:0] VGA_R,
@@ -97,12 +101,24 @@ assign busen_n = VIDEO;
 i8228 i8228 ( .memr_n(memr_n), .memw_n(memw_n), .ior_n(ior_n), .iow_n(iow_n), .inta_n(inta_n), .inta_12V(1'b1),
 		.d8080(data8080), .db(data_bus), .busen_n(busen_n), .ststb_n(ststb_n), .dbin(dbin), .wr_n(wr_n), .hlda(hlda) );
 		
+//-------------------------------------------------------------------------------
+//  Cassette audio in 
+//
+  
+wire tape_adc, tape_adc_act;
+ltc2308_tape ltc2308_tape
+(
+	.clk(clk_50M),
+	.ADC_BUS(ADC_BUS),
+	.dout(tape_adc),
+	.active(tape_adc_act)
+);  
 
 
 //------------------------------- Interface board (ifc) ------------------------------------------------
 //  
 //
-wire clk_1Hz; // 1Hz clock - replacement for original U114/MHA1116
+reg clk_1Hz; // 1Hz clock - replacement for original U114/MHA1116
 reg [25:0] cnt_1Hz;
 
 always @(posedge osc) begin
@@ -149,7 +165,8 @@ i8251 ifc_i8251(
 	.d(data_bus),
 
 	.TxC_n(ifc_out1),
-	.RxC_n(ifc_out1)
+	.RxC_n(ifc_out1),
+	.DSR_n(~tape_adc)
 );
 
 //pullup(ifc_gate0);
@@ -201,7 +218,107 @@ assign ifc_PB_K34 = ifc_PC_K34[0] ?
 	((joystickPort == 2'b10) ? {3'b111, (joy[7:4] == 4'b0000), ~joy[1], ~joy[0], ~joy[3], ~joy[2] } : 8'hFF) : 
 	8'hzz; // Joy 1 = K4 GPIO 1
 
+//-------------------------------------------------------------------------------	
+// Mouse
 
+wire [7:0] MouseData;
+wire MouseLButton;
+wire MouseRButton;
+wire [7:0] MouseXMovement;
+wire MouseXMovementSign;
+wire [7:0] MouseYMovement;
+wire MouseYMovementSign;
+reg MouseX1;
+reg MouseX2;
+reg MouseY1;
+reg MouseY2;
+wire MouseEvent;
+reg MouseEventLast;
+reg MouseStop;
+
+
+assign data_bus = (ifc_k2_OE && ~ior_n && iow_n && mouseEnabled) ? MouseData : 8'bzz;	
+assign MouseData = {MouseRButton, MouseLButton, 2'b00, MouseX2, MouseX1, MouseY1, MouseY2};
+
+
+assign ifc_clk0 = mouseEnabled ? ifc_out1 : 1'bz;
+assign int8080_n = mouseEnabled ? ifc_out0 : 1'bz;
+		
+assign MouseEvent = ps2_mouse[24];
+assign MouseLButton = ps2_mouse[0];
+assign MouseRButton = ps2_mouse[1];
+assign MouseXMovement = (MouseXMovementSign) ? ~ps2_mouse[15:8] : ps2_mouse[15:8];
+assign MouseYMovement = (MouseYMovementSign) ? ~ps2_mouse[23:16] : ps2_mouse[23:16];
+assign MouseXMovementSign = ps2_mouse[4]; // 1 = left
+assign MouseYMovementSign = ps2_mouse[5]; // 1 = down
+ 
+  
+wire clk_4Hz; // 4Hz clock 
+wire clk_260Hz; // 260Hz clock 
+reg [25:0] cnt_4Hz;
+reg [25:0] cnt_260Hz;
+reg [8:0] mouseFreq;
+
+always @(clk_50M or MouseEvent) begin
+	if (MouseEvent != MouseEventLast)
+	begin
+		MouseEventLast <= MouseEvent;
+		MouseStop <= 0;
+		cnt_4Hz <= 26'd0;
+	end
+	else 
+		if (cnt_4Hz == 26'd25_000_000) begin			
+		clk_4Hz <= ~clk_4Hz;
+		cnt_4Hz <= 26'd0;
+		MouseStop <= 1;
+	end else
+		cnt_4Hz <= cnt_4Hz  + 1;		
+end 
+
+always @(posedge clk_50M) begin
+	if (cnt_260Hz == 26'd192_307) begin	// 260 Hz
+	//if (cnt_260Hz == 26'd384_615) begin	// 130 Hz
+		clk_260Hz <= ~clk_260Hz;
+		cnt_260Hz <= 26'd0;
+		mouseFreq <= mouseFreq + 1;
+	end else
+		cnt_260Hz <= cnt_260Hz  + 1;		
+end 
+  
+wire MouseXclk;  
+assign MouseXclk = (MouseStop) ? 1'b0 :
+						 (MouseXMovement[7:6] != 2'b00) ? mouseFreq[0] :
+						 (MouseXMovement[5:4] != 2'b00) ? mouseFreq[1] :
+						 (MouseXMovement[3] != 1'b0) ? mouseFreq[2] :
+						 (MouseXMovement[2] != 1'b0) ? mouseFreq[3] :
+						 (MouseXMovement[1] != 1'b0) ? mouseFreq[4] :
+						// (MouseXMovement[0] != 1'b0) ? mouseFreq[5] :
+						 1'b0;
+						 
+always @(posedge MouseXclk)
+begin
+	MouseX1 <= MouseX2 ^ (~MouseXMovementSign);
+	MouseX2 <= MouseX1 ^ MouseXMovementSign;
+end
+
+wire MouseYclk;  
+assign MouseYclk = (MouseStop) ? 1'b0 :
+						 (MouseYMovement[7:6] != 2'b00) ? mouseFreq[0] :
+						 (MouseYMovement[5:4] != 2'b00) ? mouseFreq[1] :
+						 (MouseYMovement[3] != 1'b0) ? mouseFreq[2] :
+						 (MouseYMovement[2] != 1'b0) ? mouseFreq[3] :
+						 (MouseYMovement[1] != 1'b0) ? mouseFreq[4] :
+						 //(MouseYMovement[0] != 1'b0) ? mouseFreq[5] : 
+						 1'b0;
+						 
+always @(posedge MouseYclk)
+begin
+	MouseY1 <= MouseY2 ^ (~MouseYMovementSign);
+	MouseY2 <= MouseY1 ^ MouseYMovementSign;
+end	
+ 
+ 
+ 
 //-------------------------------------------------------------------------------	
 // MIF85 - Sound card
 //
@@ -211,6 +328,9 @@ wire [7:0] MIF85_R;
 wire MIF85_IntWrite_CS;
 reg MIF85_IntEnable;
 reg [6:0] MIF85_cnt;
+wire MIF85Enabled;
+
+assign MIF85Enabled = (audioMode == 1'b1);
 
 initial begin
 	MIF85_IntEnable = 1;
@@ -219,14 +339,14 @@ end
 
 assign MIF85_CS_n =  ~(address_bus[7:1] == 7'b1110111); // 0xEE, 0xEF
 assign MIF85_IntWrite_CS = (address_bus == 8'b11101100) & ~iow_n; // 0xEC
-assign int8080_n = ~((MIF85_cnt != 7'd0) & MIF85_IntEnable & audioMode); 
-assign ifc_clk0 = ~phi2;
+assign int8080_n = (MIF85Enabled && MIF85_IntEnable) ? ~(MIF85_cnt != 7'd0) : 1'bz; 
+assign ifc_clk0 = (MIF85Enabled) ? ~phi2 : 1'bz;
  
 
 always @(posedge clk_8M)  // 12us pulse for INT
 begin
 	if (~ifc_out0 & MIF85_IntEnable & (MIF85_cnt == 7'd0))
-		MIF85_cnt <= 6'd100;
+		MIF85_cnt <= 7'd100;
 	else
 	if (MIF85_cnt != 7'd0)
 		MIF85_cnt <= MIF85_cnt - 1;
@@ -256,6 +376,7 @@ saa1099 MIF85 (
 wire [7:0] PA;
 wire [7:0] PB;
 wire [7:0] PC;
+wire PCHisInput;
  
 i8255 Key8255 (
 	.PA(PA),	
@@ -263,6 +384,7 @@ i8255 Key8255 (
 	.PC(PC),	
 	.DIn(data_bus), 
 	.DOut(data_bus),
+	.PCHisInput(PCHisInput),
 	.clk(osc),
 	.RD_n(ior_n),
 	.WR_n(iow_n),
@@ -320,7 +442,7 @@ dpram #(.ADDRWIDTH(15)) myROMPack
 	.wren_a(0),
 	.address_b(ioctl_addr),
 	.data_b(ioctl_dout),
-	.wren_b((ioctl_index == 8'd1) & ioctl_wr & ioctl_download),	
+	.wren_b((ioctl_index == 8'd1) & ioctl_wr & ioctl_download)	
 );
  
  
@@ -341,8 +463,10 @@ initial begin
 end
 
 assign RAS_n = ~clk_shift[2];
-assign CAS = ~( clk_shift[1] & clk_shift[7] ); 
-assign STB_n = ~( VIDEO & clk_shift[4] & clk_shift[7] ); // IC51C 
+//assign CAS = clk_shift[4]; // takto je to nakresleno ve schematu barevnem <-- asi chyba!
+assign CAS = ~( clk_shift[1] & clk_shift[7] ); // schema v3?
+//assign STB_n = ~( VIDEO & clk_shift[4] & clk_shift[6] ); // IC51C -- takhle je to nakresleno ve schematu
+assign STB_n = ~( VIDEO & clk_shift[4] & clk_shift[7] ); // IC51C -- tohle je z opravarenskeho manualu asi PMD v1?
 assign AMUX = clk_shift[7];
 assign clk_video = ~( ~( clk_shift[1] & clk_shift[7] ) & // IC38D
 	             ~( clk_shift[1] & clk_shift[4] ) & // IC38B
@@ -396,8 +520,9 @@ initial begin
 end
 			
 assign allRam_n = 1;
+//assign allRam_n = PCHisInput ? 1'b1 : PC[4]; // if 8255 PC Hi port is setup as input, pullup rezistor do it's job
 //assign allRam_n = PC[4]; //Key8255 PC[4]=0 .. RAM only <-- PULLUP SHOULD BE HERE!
-		
+				
 always @(posedge clk_sys) begin
 	
 	if (reset)
@@ -426,7 +551,7 @@ assign CAS7_n = ~(( ~memr_n | ~memw_n | VIDEO ) & CAS & ~isEprom );
 wire [7:0] addrRam;
 
 assign addrRam = // this is address shown to DRAM module
-    (( {AMUX, VIDEO} ) == 2'b00) ? address_bus[14:7] :	// address cols
+    (( {AMUX, VIDEO} ) == 2'b00) ? address_bus[14:7] :  // address cols
     (( {AMUX, VIDEO} ) == 2'b01) ? { 1'b1, r[13:7] } :  // refresh + video cols
     (( {AMUX, VIDEO} ) == 2'b10) ? { address_bus[15], address_bus[6:0] } :  // address rows
     (( {AMUX, VIDEO} ) == 2'b11) ? { 1'b1, r[6:0] } : 8'bzzzzzzz;  //refresh + video cols
