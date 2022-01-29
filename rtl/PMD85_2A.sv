@@ -15,7 +15,9 @@ module PMD85_2A (
 	output pixel,
 	 
 	inout  [3:0] ADC_BUS,
-	
+	input  wire RxD,
+	output wire TxD,
+		
 	input audioMode, 				// 0 = Beeper, 1 = Beeper + MIF85
 	output [15:0] AUDIO_L,
 	output [15:0] AUDIO_R,
@@ -32,6 +34,7 @@ module PMD85_2A (
 	
 	output LED_YELLOW,
 	output LED_RED,
+   output allRam_n,
 	 
 	inout         ioctl_download , // signal indicating an active download
 	inout   [7:0] ioctl_index,     // menu index used to upload the file
@@ -154,19 +157,27 @@ assign ifc_CS7_n = ~(address_bus[4] & address_bus[5] & address_bus[6] & ~address
 assign ifc_k2_OE = address_bus[3] & address_bus[2] & address_bus[7];
 assign data_bus_K2 = (ifc_k2_OE & ior_n & ~iow_n) ? data_bus : 8'bzz;
 //assign data_bus = (ifc_k2_OE & ~ior_n & iow_n) ? data_bus_K2 : 8'bzz;
+wire RTS_CTS;
 
 i8251 ifc_i8251( 
-	.clk(phi2), 
-	.reset(reset), 
-	.cs_n(ifc_CS1_n), 
-	.wr_n(iow_n), 
-	.rd_n(ior_n), 
-	.cd(address_bus[0]), 
-	.d(data_bus),
-
+	.CLK(phi2), 
+	.RESET(reset), 
+	.CS_n(ifc_CS1_n), 
+	.WR_n(iow_n), 
+	.RD_n(ior_n), 
+	.CD(address_bus[0]), 
+	.D(data_bus),
+ 
+	.TxD(TxD),
 	.TxC_n(ifc_out1),
+	
+	.RxD(RxD),
 	.RxC_n(ifc_out1),
-	.DSR_n(~tape_adc)
+	
+	.DSR_n(~tape_adc),
+	
+	.CTS_n(RTS_CTS),
+	.RTS_n(RTS_CTS)
 );
 
 //pullup(ifc_gate0);
@@ -201,7 +212,7 @@ i8255 ifc_i8255_K34 (
 	.WR_n(iow_n),
 	.A( {address_bus[1], address_bus[0]} ),
 	.RESET(reset),
-	.CS_n(address_bus[4])
+	.CS_n(ifc_CS4_n)
 );
 
 	
@@ -511,17 +522,17 @@ end
 // CS + CAS7 coder - originaly made with 2x 3205
 wire [3:0] csTmp;
 wire [3:0] cs; // driving eprom chips CS
-wire allRam_n; // 1 .. ROM, 0 .. RAM only
+// wire allRam_n; // 1 .. ROM, 0 .. RAM only - declared in module ports
 wire CAS7_n;
 reg postReset;
 
 initial begin
 	postReset = 1;
 end
-			
-assign allRam_n = 1;
-//assign allRam_n = PCHisInput ? 1'b1 : PC[4]; // if 8255 PC Hi port is setup as input, pullup rezistor do it's job
-//assign allRam_n = PC[4]; //Key8255 PC[4]=0 .. RAM only <-- PULLUP SHOULD BE HERE!
+
+
+assign allRam_n = PCHisInput ? 1'b1 : PC[4]; // if 8255 PC Hi port is setup as input, pullup rezistor do it's job
+
 				
 always @(posedge clk_sys) begin
 	
@@ -532,7 +543,7 @@ always @(posedge clk_sys) begin
 end	
 
 
-wire isEprom = ( ~memr_n & ~address_bus[14] & allRam_n & ~VIDEO & ( address_bus[15] | postReset ) );
+wire isEprom = ( ~memr_n & ~address_bus[12] & ~address_bus[14] & allRam_n & ~VIDEO & ( address_bus[15] | postReset ) );
 assign csTmp = ( address_bus[12:10] == 3'b000 ) ? 4'b0001 :
                ( address_bus[12:10] == 3'b001 ) ? 4'b0010 :
                ( address_bus[12:10] == 3'b010 ) ? 4'b0100 :

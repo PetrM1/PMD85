@@ -122,8 +122,9 @@ module emu
 
 ///////// Default values for ports not used in this core /////////
 
-assign ADC_BUS  = 'Z;
-assign USER_OUT = '1;
+//assign ADC_BUS  = 'Z;
+//assign USER_OUT = '1;
+
 assign {UART_RTS, UART_TXD, UART_DTR} = 0;
 assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
 assign {SDRAM_DQ, SDRAM_A, SDRAM_BA, SDRAM_CLK, SDRAM_CKE, SDRAM_DQML, SDRAM_DQMH, SDRAM_nWE, SDRAM_nCAS, SDRAM_nRAS, SDRAM_nCS} = 'Z;
@@ -139,7 +140,17 @@ assign AUDIO_MIX = 3;
 wire LED_YELLOW;
 wire LED_RED;
 
-assign LED_POWER = 2'b00;	
+assign LED_POWER = {1'b1, led_blink[23] | allRam_n};
+
+wire [23:0] led_blink;
+always @(posedge CLK_50M)
+begin
+   led_blink <= led_blink + 1;
+end
+
+
+
+
 assign LED_USER = LED_RED;
 assign LED_DISK = { 1'b1, LED_YELLOW };	
 assign BUTTONS = 0;
@@ -234,8 +245,12 @@ wire SD_n;
 wire ZAT_n;
 wire pixel;
 wire [1:0] pixelFunction;
-
-wire xxx;
+wire allRam_n;
+wire RxD;
+wire TxD;
+assign USER_OUT[1:0] = {TxD, 1'b1};
+assign RxD = USER_IN[0];
+	
 	
 PMD85_2A PMD85core
 (
@@ -252,6 +267,8 @@ PMD85_2A PMD85core
 	.pixel(pixel),
 	
 	.ADC_BUS(ADC_BUS),
+	.RxD(RxD),
+	.TxD(TxD),   
 	.audioMode(status[3]),
 	.AUDIO_L(AUDIO_L),
 	.AUDIO_R(AUDIO_R),
@@ -263,6 +280,7 @@ PMD85_2A PMD85core
 		
 	.LED_YELLOW(LED_YELLOW),
 	.LED_RED(LED_RED),
+   .allRam_n(allRam_n),
 	 	
 	.joystickPort(status[5:4]),
 	.joy0(joy0),
